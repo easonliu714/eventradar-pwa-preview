@@ -181,6 +181,7 @@
 </div>
 
 <script src="event_visibility.js"></script>
+<script src="eventgo_period_gate.js"></script>
 <script>
     let allEvents = [];
     let filteredEvents = [];
@@ -239,12 +240,14 @@
                 const rawSnapshot = await res.json();
                 // G5C: reversible display filtering; original data.json is never edited.
                 const visibility = EventRadarValidity.filter(rawSnapshot);
-                allEvents = visibility.visible;
+                // G5D: exact Event Go title period evidence; G5C already executed.
+                const g5d = EventRadarTitlePeriodGate.filter(visibility.visible, visibility.report.day);
+                allEvents = g5d.visible;
                 const audit = visibility.report;
                 document.getElementById('validity-audit').textContent =
-                    `活動有效性：顯示 ${audit.visible}／${audit.total} 筆；隱藏 ${audit.hidden} 筆` +
-                    `（日期判定逾期 ${audit.expired_strict}、非活動 ${audit.non_event}）。` +
-                    `暫留待查 ${audit.date_conflict_keep + audit.date_mismatch_review + audit.title_expiry_review_keep} 筆` +
+                    `活動有效性：顯示 ${g5d.report.visible}／${audit.total} 筆；隱藏 ${audit.hidden + g5d.report.hidden} 筆` +
+                    `（專用日期逾期 ${audit.expired_strict}、Event Go 完整活動區間逾期 ${g5d.report.hidden}、非活動 ${audit.non_event}）。` +
+                    `暫留待查 ${audit.date_conflict_keep + audit.date_mismatch_review + audit.title_expiry_review_keep - g5d.report.hidden} 筆` +
                     `；日期不明 ${audit.date_unknown_keep} 筆。來源失效候選不會自動隱藏。`;
                 allEvents.sort((a,b) => new Date(b.scraped_at) - new Date(a.scraped_at));
 
