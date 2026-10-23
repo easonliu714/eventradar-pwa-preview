@@ -116,6 +116,11 @@
     <div class="disclaimer">⚠️ 活動列表僅供參考，活動內容以各平台資訊為準。</div>
 </div>
 
+<div id="validity-audit" role="status" aria-live="polite"
+     style="background:#181818;color:#ddd;font-size:0.8rem;padding:10px 16px;border-bottom:1px solid #333">
+    G5C 活動有效性檢查中…
+</div>
+
 <div id="event-list"></div>
 
 <div class="pagination">
@@ -175,6 +180,7 @@
     </div>
 </div>
 
+<script src="event_visibility.js"></script>
 <script>
     let allEvents = [];
     let filteredEvents = [];
@@ -230,7 +236,16 @@
 
                 if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
-                allEvents = await res.json();
+                const rawSnapshot = await res.json();
+                // G5C: reversible display filtering; original data.json is never edited.
+                const visibility = EventRadarValidity.filter(rawSnapshot);
+                allEvents = visibility.visible;
+                const audit = visibility.report;
+                document.getElementById('validity-audit').textContent =
+                    `活動有效性：顯示 ${audit.visible}／${audit.total} 筆；隱藏 ${audit.hidden} 筆` +
+                    `（日期判定逾期 ${audit.expired_strict}、非活動 ${audit.non_event}）。` +
+                    `暫留待查 ${audit.date_conflict_keep + audit.date_mismatch_review + audit.title_expiry_review_keep} 筆` +
+                    `；日期不明 ${audit.date_unknown_keep} 筆。來源失效候選不會自動隱藏。`;
                 allEvents.sort((a,b) => new Date(b.scraped_at) - new Date(a.scraped_at));
 
                 const latestTime = allEvents[0]?.scraped_at;
