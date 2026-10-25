@@ -1,0 +1,132 @@
+name: EventRadar P29 preview native PR CI
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: eventradar-p29-preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  ui-offline:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      ((github.event.number == 1 && github.head_ref == 'feat/eventradar-preview-ui-p20') ||
+       github.head_ref == 'ci/eventradar-preview-pr-ci-p29')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify PR identity and distinct commit roles
+        env:
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          pr = event['pull_request']
+          repo = 'easonliu714/eventradar-pwa-preview'
+          assert os.environ['GITHUB_EVENT_NAME'] == 'pull_request'
+          assert event['action'] in ('opened', 'synchronize', 'reopened')
+          assert pr['head']['repo']['full_name'] == repo
+          assert pr['base']['repo']['full_name'] == repo
+          assert pr['base']['ref'] == 'main'
+          p20 = 'b55b3673088b6df7bfe51f04d8d82b8e7616324f'
+          if pr['head']['ref'] == 'feat/eventradar-preview-ui-p20':
+              assert event['number'] == 1
+              assert pr['head']['sha'] == p20, 'HOLD_P20_HEAD_DRIFT'
+              mode = 'P20_NATIVE_PR_HEAD_TEST'
+          else:
+              assert pr['head']['ref'] == 'ci/eventradar-preview-pr-ci-p29'
+              mode = 'P29_BOOTSTRAP_NOT_P20_CHECK'
+          assert os.environ['GITHUB_REF'] == f"refs/pull/{event['number']}/merge"
+          evidence = {
+            'MODE': mode,
+            'TRIGGER_PR_HEAD_SHA': pr['head']['sha'],
+            'EVENT_BASE_SHA': pr['base']['sha'],
+            'SYNTHETIC_MERGE_SHA': os.environ['GITHUB_SHA'],
+            'WORKFLOW_SHA': os.environ['WORKFLOW_SHA'],
+            'TESTED_P20_HEAD_SHA': p20,
+          }
+          for key, value in evidence.items():
+              if key.endswith('_SHA'):
+                  assert re.fullmatch(r'[a-f0-9]{40}', value), key
+              print(f'{key}={value}')
+          print('CHECK_RUN_HEAD_SHA=REQUIRES_INDEPENDENT_GITHUB_API_READBACK')
+          print('GOLDEN_ACCEPTED=0 AUTO_HIDDEN=0 APP_DATA_PUBLISHED=false')
+          PY
+      - name: Checkout exact PR head, no persistent credentials
+        uses: actions/checkout@v4
+        with:
+          ref: b55b3673088b6df7bfe51f04d8d82b8e7616324f
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact index-only diff and frozen immutable data
+        env:
+          BASE_SHA: a8cde084ab5581736d86094d8cdcc2cdc9963000
+          HEAD_SHA: b55b3673088b6df7bfe51f04d8d82b8e7616324f
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git diff --name-status "$BASE_SHA" "$HEAD_SHA")" = "$(printf 'M\tindex.html')"
+          test "$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- data.json event_visibility.js eventgo_period_gate.js manifest.json preview_status.json)" = ""
+          echo PASS P21_PREVIEW_INDEX_ONLY_AND_DATA_UNCHANGED
+      - name: Freeze immutable P20 source branch, read only
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/feat/eventradar-preview-ui-p20 | awk '{print $1}')" = "b55b3673088b6df7bfe51f04d8d82b8e7616324f"
+          echo PASS P29_PREVIEW_P20_HEAD_FROZEN
+      - name: Browser-role 9 synthetic cases, modal, escaped HTML, JS syntax
+        run: |
+          node --check event_visibility.js
+          node --check eventgo_period_gate.js
+          node <<'NODE'
+          const fs = require('fs');
+          const vm = require('vm');
+          const assert = require('assert/strict');
+          const html = fs.readFileSync('index.html', 'utf8');
+          const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(m => m[1]).filter(s => s.trim().length > 0);
+          assert.equal(scripts.length, 1, 'unexpected inline script count');
+          new vm.Script(scripts[0], {filename:'index-inline.js'});
+          const first = html.indexOf('function referenceFieldText(');
+          const last = html.indexOf('function openDetail(', first);
+          assert(first > 0 && last > first, 'display helper anchors');
+          const helpers = html.slice(first, last);
+          const context = vm.createContext({});
+          new vm.Script(helpers+'\n;globalThis.testFunctions={referenceFieldText,referenceCardSummary};').runInContext(context);
+          const {referenceFieldText:f,referenceCardSummary:card} = context.testFunctions;
+          const cases = [
+           [{date:'2026-12-03',location:'測試市文化廣場',price:'NT$350'},['2026-12-03','測試市文化廣場','NT$350']],
+           [{date:'2026-12-04',location:'測試市表演廳',price:'NT$500',display_roles:{date:'MULTI_SESSION'}},['2026-12-04（另有場次，詳見官方）','測試市表演廳','NT$500']],
+           [{location:'測試市手作教室',price:'NT$200'},['活動日期請見官方','測試市手作教室','NT$200']],
+           [{date:'2026-12-05',price:'NT$400',display_roles:{location:'HYBRID'}},['2026-12-05','依場次／參加方式而異，詳見官方','NT$400']],
+           [{date:'2026-12-07',location:'測試市演講廳',price:'免費',display_roles:{price:'CONDITIONAL_PRICE'}},['2026-12-07','測試市演講廳','依票種／參加資格而異，詳見官方']],
+           [{date:'2026-12-08',location:'測試市社區中心'},['2026-12-08','測試市社區中心','票價／費用請見官方']],
+           [{location:'測試市音樂廳',price:'依節目',display_roles:{date:'MULTI_SESSION'}},['依場次而異，詳見官方','測試市音樂廳','依節目']],
+           [{date:'2026-12-10',price:'NT$250',display_roles:{location:'MULTI_LOCATION'}},['2026-12-10','依場次／參加方式而異，詳見官方','NT$250']],
+           [{},['活動日期請見官方','活動地點請見官方','票價／費用請見官方']]
+          ];
+          for(const [ev, expected] of cases) {
+           const got=['date','location','price'].map(key=>f(ev,key));
+           assert.deepEqual(got,expected);
+           const cardHtml=card(ev);
+           assert.equal((cardHtml.match(/event-card-summary-line/g)||[]).length,3);
+           for(const value of expected)assert(cardHtml.includes(value));
+          }
+          const injection=card({date:'<img src=x onerror=alert(1)>', location:'A&B',price:'"free"'});
+          assert(!injection.includes('<img') && injection.includes('&lt;img') && injection.includes('A&amp;B') && injection.includes('&quot;free&quot;'));
+          assert.equal((html.match(/活動資訊僅供參考，請以官方網站及主辦單位最新公告為準。/g)||[]).length,1);
+          assert(html.includes('本雷達彙整公開活動及售票資訊'));
+          assert(html.includes("document.getElementById('m-date').textContent = referenceFieldText(ev, 'date')"));
+          assert(html.includes("document.getElementById('m-location').textContent = referenceFieldText(ev, 'location')"));
+          assert(html.includes("document.getElementById('m-price').textContent = referenceFieldText(ev, 'price')"));
+          console.log('PASS SRC_P21_PREVIEW_NINE_ROLE_CASES_MODAL_ESCAPE_AND_INLINE_SYNTAX');
+          NODE
+      - name: Explicit no-deployment completion
+        run: echo 'PASS P29_PREVIEW_NATIVE_CI_NO_DATA_WRITE_NO_DEPLOY_NO_NOTIFY'
