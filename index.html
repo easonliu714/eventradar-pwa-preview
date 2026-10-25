@@ -113,7 +113,7 @@
         <span id="result-count">顯示 0 筆活動</span>
         <span id="update-time" style="font-size:0.8em">更新於: ...</span>
     </div>
-    <div class="disclaimer">⚠️ 活動列表僅供參考，活動內容以各平台資訊為準。</div>
+    <div class="disclaimer">⚠️ 活動資訊僅供參考，請以官方網站及主辦單位最新公告為準。</div>
 </div>
 
 <div id="validity-audit" role="status" aria-live="polite"
@@ -152,6 +152,7 @@
         </div>
 
         <a id="m-link" href="#" target="_blank" style="display:block; padding:12px; background:#3b82f6; color:#fff; text-align:center; border-radius:8px; text-decoration:none; font-weight:bold;">前往官網查看詳情</a>
+        <p id="m-source-note" style="font-size:0.78rem;line-height:1.55;color:#a3a3a3;margin:12px 0 0;">本雷達彙整公開活動及售票資訊，內容僅供參考。活動日期、時間、地點、場次、票價、票種及報名狀態可能依主辦單位公告調整，實際資訊請以活動官方網站及主辦單位最新公告為準。</p>
     </div>
 </div>
 
@@ -500,7 +501,7 @@
                             <span class="badge">${e.type}</span>
                         </div>
                         <div style="font-weight:500; font-size:1rem;">${e.title}</div>
-                        <div style="font-size:0.8rem; color:#888;">${e.date || '詳內文'} ${e.location ? `| ${e.location}` : ''}</div>
+                        <div class="event-card-summary" style="font-size:0.8rem;color:#aab0bb;line-height:1.55;margin-top:5px;overflow-wrap:anywhere;">${referenceCardSummary(e)}</div>
                     </div></div>`;
         }).join('');
     }
@@ -513,6 +514,30 @@
     }
 
     function changePage(delta) { currentPage += delta; renderList(); renderPagination(); window.scrollTo(0, 0); }
+
+        // [SRC-P12] Presentation only. Optional audited source roles; never infer availability or modify event data.
+        function referenceFieldText(ev, field) {
+            const fallback = {date:'活動日期請見官方', location:'活動地點請見官方', price:'票價／費用請見官方'};
+            const value = typeof ev[field] === 'string' ? ev[field].trim() : '';
+            const roles = ev.display_roles && typeof ev.display_roles === 'object' && !Array.isArray(ev.display_roles) ? ev.display_roles : {};
+            const role = roles[field];
+            if (field === 'date' && role === 'MULTI_SESSION') return value ? value + '（另有場次，詳見官方）' : '依場次而異，詳見官方';
+            if (field === 'location' && (role === 'MULTI_LOCATION' || role === 'HYBRID')) return '依場次／參加方式而異，詳見官方';
+            if (field === 'price' && role === 'CONDITIONAL_PRICE') return '依票種／參加資格而異，詳見官方';
+            return value || fallback[field];
+        }
+
+    // [SRC-P15] Listing only: same source-role policy as detail modal; escaped for innerHTML.
+    function safeCardText(value) {
+        return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function referenceCardSummary(ev) {
+        return ['date', 'location', 'price'].map((field) => {
+            const icon = {date:'📅',location:'📍',price:'💰'}[field];
+            const value = referenceFieldText(ev, field);
+            return `<div class="event-card-summary-line">${icon} ${safeCardText(value)}</div>`;
+        }).join('');
+    }
 
     function openDetail(url) {
         const ev = allEvents.find(e => e.url === url);
@@ -529,9 +554,9 @@
         document.getElementById('m-type').textContent = ev.type;
         document.getElementById('m-link').href = ev.url;
 
-        document.getElementById('m-date').textContent = ev.date || '詳內文';
-        document.getElementById('m-location').textContent = ev.location || '詳內文';
-        document.getElementById('m-price').textContent = ev.price || '詳內文';
+        document.getElementById('m-date').textContent = referenceFieldText(ev, 'date');
+        document.getElementById('m-location').textContent = referenceFieldText(ev, 'location');
+        document.getElementById('m-price').textContent = referenceFieldText(ev, 'price');
 
         const desc = ev.description ? ev.description : '暫無詳細簡介，請點擊下方按鈕前往官網查看。';
         document.getElementById('m-desc').textContent = desc;
